@@ -14,6 +14,9 @@ from enum import Enum
 
 from src.core.config import settings
 from src.utils.device_manager import device_manager
+from src.agents.search_agent import search_agent
+from src.agents.analysis_agent import analysis_agent
+from src.database.sqlite_manager import db_manager
 
 
 class TaskStatus(Enum):
@@ -207,16 +210,40 @@ class CoordinatorAgent:
         """
         logger.info(f"[{task.task_id}] 阶段2: 搜索文献")
         
-        # 这里会调用搜索智能体
-        # 从多个数据源并行搜索文献
-        
-        task.results["literature"] = {
-            "total_papers": 0,
-            "sources": {},
-            "papers": [],
-        }
-        
-        await asyncio.sleep(1.0)  # 模拟处理时间
+        try:
+            # 调用搜索智能体
+            search_results = await search_agent.search(
+                query=task.query,
+                sources=['arxiv', 'pubmed', 'semantic_scholar'] if not task.include_patents else ['arxiv', 'pubmed', 'semantic_scholar'],
+                max_results=100 if task.depth == 'comprehensive' else 50,
+            )
+            
+            # 去重
+            unique_papers = search_agent.deduplicate_papers(search_results)
+            
+            # 保存到数据库缓存
+            for paper in unique_papers:
+                try:
+                    db_manager.cache_paper(paper)
+                except Exception as e:
+                    logger.warning(f"缓存文献失败: {e}")
+            
+            task.results["literature"] = {
+                "total_papers": len(unique_papers),
+                "sources": {source: len(papers) for source, papers in search_results.items()},
+                "papers": unique_papers,
+            }
+            
+            logger.success(f"搜索完成，共找到 {len(unique_papers)} 篇文献")
+            
+        except Exception as e:
+            logger.error(f"文献搜索失败: {e}")
+            task.results["literature"] = {
+                "total_papers": 0,
+                "sources": {},
+                "papers": [],
+                "error": str(e),
+            }
     
     async def _analyze_literature(self, task: ResearchTask):
         """
@@ -227,16 +254,60 @@ class CoordinatorAgent:
         """
         logger.info(f"[{task.task_id}] 阶段3: 分析文献")
         
-        # 这里会调用分析智能体
-        # 进行文献质量评分、关键信息提取等
-        
-        task.results["analysis"] = {
-            "quality_scores": {},
-            "key_findings": [],
-            "trends": [],
-        }
-        
-        await asyncio.sleep(0.8)  # 模拟处理时间
+        try:
+            papers = task.results.get("literature", {}).get("papers", [])
+            
+            if not papers:
+                logger.warning("没有文献可供分析")
+                task.results["analysis"] = {
+                    "quality_scores": {},
+                    "keywords": [],
+                    "trends": {},
+                    "key_findings": [],
+                }
+                return
+            
+            # 调用分析智能体
+            analysis_results = await analysis_agent.analyze_papers(
+                papers=papers,
+                extract_keywords=True,
+                calculate_quality=True,
+                analyze_trends=True,
+            )
+            
+            # 过滤高质量文献
+            min_score = settings.PAPER_QUALITY_THRESHOLD
+            high_quality_papers = analysis_agent.filter_by_quality(
+                analysis_results['papers_with_scores'],
+                min_score=min_score
+            )
+            
+            # 提取关键发现
+            key_findings = analysis_agent.extract_key_findings(
+                high_quality_papers,
+                top_n=10
+            )
+            
+            task.results["analysis"] = {
+                "total_analyzed": len(papers),
+                "high_quality_count": len(high_quality_papers),
+                "quality_threshold": min_score,
+                "statistics": analysis_results['statistics'],
+                "keywords": analysis_results['keywords'][:20],  # 前20个关键词
+                "trends": analysis_results['trends'],
+                "key_findings": key_findings,
+            }
+            
+            # 更新文献列表为高质量文献
+            task.results["literature"]["papers"] = high_quality_papers
+            
+            logger.success(f"分析完成，{len(high_quality_papers)} 篇高质量文献")
+            
+        except Exception as e:
+            logger.error(f"文献分析失败: {e}")
+            task.results["analysis"] = {
+                "error": str(e),
+            }
     
     async def _build_knowledge_graph(self, task: ResearchTask):
         """
