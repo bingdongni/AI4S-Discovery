@@ -2,311 +2,233 @@
 # -*- coding: utf-8 -*-
 """
 分析智能体（Analysis Agent）
-负责文献质量评分、关键信息提取和趋势分析
+负责文献质量评分、关键信息提取、趋势分析
 """
 
 import re
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional
 from datetime import datetime
+from collections import Counter
 from loguru import logger
 import numpy as np
+from sklearn.feature_extraction.text import TfidfVectorizer
 
-from src.core.config import settings
 
-
-class PaperQualityScorer:
-    """文献质量评分器"""
+class AnalysisAgent:
+    """分析智能体"""
     
     def __init__(self):
-        """初始化评分器"""
-        self.weights = {
-            'citation_count': 0.25,
-            'venue_quality': 0.20,
-            'author_reputation': 0.15,
-            'recency': 0.15,
-            'completeness': 0.15,
-            'reproducibility': 0.10,
-        }
+        """初始化分析智能体"""
+        self.tfidf_vectorizer = TfidfVectorizer(
+            max_features=100,
+            stop_words='english',
+            ngram_range=(1, 2)
+        )
+        logger.info("分析智能体初始化完成")
     
-    def score_paper(self, paper: Dict) -> float:
+    async def analyze_papers(
+        self,
+        papers: List[Dict],
+        extract_keywords: bool = True,
+        calculate_quality: bool = True,
+        analyze_trends: bool = True,
+    ) -> Dict:
         """
-        评分单篇文献
+        分析文献集合
         
         Args:
-            paper: 文献信息字典
+            papers: 文献列表
+            extract_keywords: 是否提取关键词
+            calculate_quality: 是否计算质量分数
+            analyze_trends: 是否分析趋势
         
         Returns:
-            float: 质量分数 (0-100)
+            Dict: 分析结果
         """
-        scores = {}
+        logger.info(f"开始分析 {len(papers)} 篇文献")
         
-        # 1. 引用数评分
-        citation_count = paper.get('citationCount', 0)
-        scores['citation_count'] = min(citation_count / 100, 1.0) * 100
+        results = {
+            'total_papers': len(papers),
+            'papers_with_scores': [],
+            'keywords': [],
+            'trends': {},
+            'statistics': {},
+        }
         
-        # 2. 发表venue质量评分
-        venue = paper.get('venue', '').lower()
-        scores['venue_quality'] = self._score_venue(venue)
+        if not papers:
+            return results
         
-        # 3. 作者声誉评分
-        authors = paper.get('authors', [])
-        scores['author_reputation'] = self._score_authors(authors)
-        
-        # 4. 时效性评分
-        year = paper.get('year', 0)
-        scores['recency'] = self._score_recency(year)
-        
-        # 5. 完整性评分
-        scores['completeness'] = self._score_completeness(paper)
-        
-        # 6. 可复现性评分
-        scores['reproducibility'] = self._score_reproducibility(paper)
-        
-        # 加权总分
-        total_score = sum(
-            scores[key] * self.weights[key]
-            for key in self.weights.keys()
-        )
-        
-        return round(total_score, 2)
-    
-    def _score_venue(self, venue: str) -> float:
-        """评分发表venue"""
-        # 顶级会议和期刊
-        top_venues = [
-            'nature', 'science', 'cell', 'nejm', 'lancet',
-            'neurips', 'icml', 'iclr', 'cvpr', 'iccv',
-            'acl', 'emnlp', 'naacl', 'sigir', 'kdd',
-            'jacs', 'advanced materials', 'energy'
-        ]
-        
-        for top in top_venues:
-            if top in venue:
-                return 100.0
-        
-        # 一般期刊/会议
-        if any(word in venue for word in ['journal', 'conference', 'proceedings']):
-            return 70.0
-        
-        # 预印本
-        if 'arxiv' in venue or 'biorxiv' in venue:
-            return 50.0
-        
-        return 40.0
-    
-    def _score_authors(self, authors: List[Dict]) -> float:
-        """评分作者团队"""
-        if not authors:
-            return 50.0
-        
-        # 简化版：基于作者数量和h-index（如果有）
-        author_count = len(authors)
-        
-        # 理想作者数：3-8人
-        if 3 <= author_count <= 8:
-            count_score = 100.0
-        elif author_count < 3:
-            count_score = 60.0
+        # 1. 质量评分
+        if calculate_quality:
+            scored_papers = []
+            for paper in papers:
+                score = self._calculate_quality_score(paper)
+                paper_with_score = paper.copy()
+                paper_with_score['quality_score'] = score
+                scored_papers.append(paper_with_score)
+            
+            # 按质量分数排序
+            scored_papers.sort(key=lambda x: x['quality_score'], reverse=True)
+            results['papers_with_scores'] = scored_papers
+            
+            # 统计信息
+            scores = [p['quality_score'] for p in scored_papers]
+            results['statistics']['quality_scores'] = {
+                'mean': np.mean(scores),
+                'median': np.median(scores),
+                'std': np.std(scores),
+                'min': np.min(scores),
+                'max': np.max(scores),
+            }
+            
+            logger.info(f"质量评分完成，平均分: {results['statistics']['quality_scores']['mean']:.2f}")
         else:
-            count_score = max(100.0 - (author_count - 8) * 5, 50.0)
+            results['papers_with_scores'] = papers
         
-        return count_score
+        # 2. 关键词提取
+        if extract_keywords:
+            keywords = self._extract_keywords(papers)
+            results['keywords'] = keywords
+            logger.info(f"提取了 {len(keywords)} 个关键词")
+        
+        # 3. 趋势分析
+        if analyze_trends:
+            trends = self._analyze_trends(papers)
+            results['trends'] = trends
+            logger.info("趋势分析完成")
+        
+        # 4. 基础统计
+        results['statistics'].update(self._calculate_statistics(papers))
+        
+        logger.success("文献分析完成")
+        return results
     
-    def _score_recency(self, year: int) -> float:
-        """评分时效性"""
-        if year == 0:
-            return 50.0
-        
-        current_year = datetime.now().year
-        age = current_year - year
-        
-        if age <= 1:
-            return 100.0
-        elif age <= 3:
-            return 90.0
-        elif age <= 5:
-            return 75.0
-        elif age <= 10:
-            return 60.0
-        else:
-            return max(50.0 - (age - 10) * 2, 20.0)
-    
-    def _score_completeness(self, paper: Dict) -> float:
-        """评分完整性"""
-        score = 0.0
-        
-        # 有标题
-        if paper.get('title'):
-            score += 20.0
-        
-        # 有摘要
-        if paper.get('abstract'):
-            score += 30.0
-        
-        # 有作者
-        if paper.get('authors'):
-            score += 20.0
-        
-        # 有发表信息
-        if paper.get('venue') or paper.get('year'):
-            score += 15.0
-        
-        # 有引用信息
-        if 'citationCount' in paper:
-            score += 15.0
-        
-        return score
-    
-    def _score_reproducibility(self, paper: Dict) -> float:
-        """评分可复现性"""
-        score = 50.0  # 基础分
-        
-        abstract = paper.get('abstract', '').lower()
-        
-        # 包含方法描述
-        if any(word in abstract for word in ['method', 'algorithm', 'approach', 'technique']):
-            score += 15.0
-        
-        # 包含数据集信息
-        if any(word in abstract for word in ['dataset', 'data', 'benchmark']):
-            score += 15.0
-        
-        # 包含代码/实现信息
-        if any(word in abstract for word in ['code', 'implementation', 'github', 'open source']):
-            score += 20.0
-        
-        return min(score, 100.0)
-
-
-class KeyInformationExtractor:
-    """关键信息提取器"""
-    
-    def extract(self, paper: Dict) -> Dict[str, Any]:
+    def _calculate_quality_score(self, paper: Dict) -> float:
         """
-        提取文献关键信息
+        计算文献质量分数（0-100）
+        
+        评分维度：
+        1. 引用数（30分）
+        2. 作者数量（10分）
+        3. 摘要质量（20分）
+        4. 发表年份（20分）
+        5. 来源可信度（20分）
         
         Args:
             paper: 文献信息
         
         Returns:
-            Dict: 提取的关键信息
+            float: 质量分数
         """
-        return {
-            'title': paper.get('title', ''),
-            'authors': self._extract_author_names(paper.get('authors', [])),
-            'year': paper.get('year', 0),
-            'venue': paper.get('venue', ''),
-            'abstract': paper.get('abstract', ''),
-            'keywords': self._extract_keywords(paper),
-            'methods': self._extract_methods(paper),
-            'datasets': self._extract_datasets(paper),
-            'metrics': self._extract_metrics(paper),
-            'contributions': self._extract_contributions(paper),
-        }
-    
-    def _extract_author_names(self, authors: List[Dict]) -> List[str]:
-        """提取作者姓名"""
-        names = []
-        for author in authors:
-            if isinstance(author, dict):
-                name = author.get('name', '')
-            else:
-                name = str(author)
-            if name:
-                names.append(name)
-        return names
-    
-    def _extract_keywords(self, paper: Dict) -> List[str]:
-        """提取关键词"""
-        # 简化版：从标题和摘要中提取
-        text = f"{paper.get('title', '')} {paper.get('abstract', '')}"
+        score = 0.0
         
-        # 常见学术关键词模式
-        keywords = []
+        # 1. 引用数评分（30分）
+        citation_count = paper.get('citationCount', 0)
+        if citation_count > 0:
+            # 对数缩放，100次引用得满分
+            citation_score = min(30, 30 * np.log10(citation_count + 1) / np.log10(101))
+            score += citation_score
         
-        # 提取专业术语（大写开头的连续词）
-        pattern = r'\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*\b'
-        matches = re.findall(pattern, text)
-        keywords.extend(matches[:10])
+        # 2. 作者数量评分（10分）
+        authors = paper.get('authors', [])
+        if authors:
+            # 3-10个作者得满分
+            author_score = min(10, len(authors) * 2)
+            score += author_score
         
-        return list(set(keywords))
-    
-    def _extract_methods(self, paper: Dict) -> List[str]:
-        """提取方法"""
-        abstract = paper.get('abstract', '').lower()
-        
-        methods = []
-        method_keywords = [
-            'neural network', 'deep learning', 'machine learning',
-            'transformer', 'cnn', 'rnn', 'lstm', 'gnn',
-            'reinforcement learning', 'supervised learning',
-            'unsupervised learning', 'transfer learning'
-        ]
-        
-        for keyword in method_keywords:
-            if keyword in abstract:
-                methods.append(keyword)
-        
-        return methods
-    
-    def _extract_datasets(self, paper: Dict) -> List[str]:
-        """提取数据集"""
-        abstract = paper.get('abstract', '').lower()
-        
-        datasets = []
-        dataset_keywords = [
-            'imagenet', 'coco', 'mnist', 'cifar',
-            'glue', 'squad', 'wmt', 'pubmed',
-            'arxiv', 'wikipedia', 'common crawl'
-        ]
-        
-        for keyword in dataset_keywords:
-            if keyword in abstract:
-                datasets.append(keyword.upper())
-        
-        return datasets
-    
-    def _extract_metrics(self, paper: Dict) -> List[str]:
-        """提取评估指标"""
-        abstract = paper.get('abstract', '').lower()
-        
-        metrics = []
-        metric_keywords = [
-            'accuracy', 'precision', 'recall', 'f1',
-            'auc', 'map', 'bleu', 'rouge',
-            'perplexity', 'loss', 'error rate'
-        ]
-        
-        for keyword in metric_keywords:
-            if keyword in abstract:
-                metrics.append(keyword)
-        
-        return metrics
-    
-    def _extract_contributions(self, paper: Dict) -> List[str]:
-        """提取主要贡献"""
+        # 3. 摘要质量评分（20分）
         abstract = paper.get('abstract', '')
+        if abstract:
+            # 基于长度和结构
+            abstract_length = len(abstract)
+            if abstract_length > 100:
+                length_score = min(10, abstract_length / 200)
+                score += length_score
+            
+            # 检查是否包含关键词
+            keywords = ['method', 'result', 'conclusion', 'experiment', 'analysis', 'study']
+            keyword_count = sum(1 for kw in keywords if kw in abstract.lower())
+            keyword_score = min(10, keyword_count * 2)
+            score += keyword_score
         
-        # 简化版：查找包含贡献关键词的句子
-        sentences = abstract.split('.')
-        contributions = []
+        # 4. 发表年份评分（20分）
+        year = paper.get('year')
+        if year:
+            current_year = datetime.now().year
+            years_ago = current_year - year
+            if years_ago <= 2:
+                year_score = 20  # 最近2年满分
+            elif years_ago <= 5:
+                year_score = 15  # 5年内15分
+            elif years_ago <= 10:
+                year_score = 10  # 10年内10分
+            else:
+                year_score = 5   # 10年以上5分
+            score += year_score
         
-        contribution_keywords = [
-            'propose', 'introduce', 'present', 'develop',
-            'achieve', 'improve', 'outperform', 'demonstrate'
-        ]
+        # 5. 来源可信度评分（20分）
+        source = paper.get('source', '')
+        source_scores = {
+            'semantic_scholar': 20,
+            'arxiv': 18,
+            'pubmed': 20,
+            'ieee': 20,
+        }
+        score += source_scores.get(source, 10)
         
-        for sentence in sentences:
-            if any(keyword in sentence.lower() for keyword in contribution_keywords):
-                contributions.append(sentence.strip())
-        
-        return contributions[:3]  # 最多3个主要贡献
-
-
-class TrendAnalyzer:
-    """趋势分析器"""
+        return round(score, 2)
     
-    def analyze_trends(self, papers: List[Dict]) -> Dict[str, Any]:
+    def _extract_keywords(self, papers: List[Dict], top_n: int = 50) -> List[Dict]:
+        """
+        从文献中提取关键词
+        
+        Args:
+            papers: 文献列表
+            top_n: 返回前N个关键词
+        
+        Returns:
+            List[Dict]: 关键词列表，包含词频和TF-IDF分数
+        """
+        # 收集所有文本
+        texts = []
+        for paper in papers:
+            text_parts = []
+            if paper.get('title'):
+                text_parts.append(paper['title'])
+            if paper.get('abstract'):
+                text_parts.append(paper['abstract'])
+            texts.append(' '.join(text_parts))
+        
+        if not texts:
+            return []
+        
+        try:
+            # TF-IDF提取
+            tfidf_matrix = self.tfidf_vectorizer.fit_transform(texts)
+            feature_names = self.tfidf_vectorizer.get_feature_names_out()
+            
+            # 计算每个词的平均TF-IDF分数
+            avg_tfidf = np.mean(tfidf_matrix.toarray(), axis=0)
+            
+            # 获取top_n个关键词
+            top_indices = avg_tfidf.argsort()[-top_n:][::-1]
+            
+            keywords = []
+            for idx in top_indices:
+                keyword = {
+                    'term': feature_names[idx],
+                    'tfidf_score': float(avg_tfidf[idx]),
+                    'frequency': int(np.sum(tfidf_matrix[:, idx].toarray() > 0)),
+                }
+                keywords.append(keyword)
+            
+            return keywords
+            
+        except Exception as e:
+            logger.error(f"关键词提取失败: {e}")
+            return []
+    
+    def _analyze_trends(self, papers: List[Dict]) -> Dict:
         """
         分析研究趋势
         
@@ -316,239 +238,156 @@ class TrendAnalyzer:
         Returns:
             Dict: 趋势分析结果
         """
-        if not papers:
-            return {}
-        
-        return {
-            'temporal_trend': self._analyze_temporal_trend(papers),
-            'topic_evolution': self._analyze_topic_evolution(papers),
-            'citation_trend': self._analyze_citation_trend(papers),
-            'venue_distribution': self._analyze_venue_distribution(papers),
-            'collaboration_network': self._analyze_collaboration(papers),
+        trends = {
+            'yearly_distribution': {},
+            'author_distribution': {},
+            'source_distribution': {},
+            'citation_trends': {},
         }
-    
-    def _analyze_temporal_trend(self, papers: List[Dict]) -> Dict:
-        """分析时间趋势"""
-        year_counts = {}
         
-        for paper in papers:
-            year = paper.get('year', 0)
-            if year > 0:
-                year_counts[year] = year_counts.get(year, 0) + 1
+        # 1. 年度分布
+        years = [p.get('year') for p in papers if p.get('year')]
+        if years:
+            year_counts = Counter(years)
+            trends['yearly_distribution'] = dict(sorted(year_counts.items()))
         
-        if not year_counts:
-            return {}
-        
-        years = sorted(year_counts.keys())
-        counts = [year_counts[y] for y in years]
-        
-        # 计算增长率
-        growth_rate = 0.0
-        if len(counts) > 1:
-            growth_rate = (counts[-1] - counts[0]) / counts[0] * 100
-        
-        return {
-            'years': years,
-            'counts': counts,
-            'growth_rate': round(growth_rate, 2),
-            'peak_year': years[counts.index(max(counts))],
-        }
-    
-    def _analyze_topic_evolution(self, papers: List[Dict]) -> Dict:
-        """分析主题演化"""
-        # 简化版：统计关键词频率
-        keyword_freq = {}
-        
-        for paper in papers:
-            abstract = paper.get('abstract', '').lower()
-            words = abstract.split()
-            
-            for word in words:
-                if len(word) > 4:  # 只统计长词
-                    keyword_freq[word] = keyword_freq.get(word, 0) + 1
-        
-        # 取前20个高频词
-        top_keywords = sorted(
-            keyword_freq.items(),
-            key=lambda x: x[1],
-            reverse=True
-        )[:20]
-        
-        return {
-            'top_keywords': [k for k, v in top_keywords],
-            'frequencies': [v for k, v in top_keywords],
-        }
-    
-    def _analyze_citation_trend(self, papers: List[Dict]) -> Dict:
-        """分析引用趋势"""
-        citations = [p.get('citationCount', 0) for p in papers]
-        
-        if not citations:
-            return {}
-        
-        return {
-            'total_citations': sum(citations),
-            'average_citations': round(np.mean(citations), 2),
-            'median_citations': int(np.median(citations)),
-            'max_citations': max(citations),
-            'highly_cited_count': sum(1 for c in citations if c > 100),
-        }
-    
-    def _analyze_venue_distribution(self, papers: List[Dict]) -> Dict:
-        """分析发表venue分布"""
-        venue_counts = {}
-        
-        for paper in papers:
-            venue = paper.get('venue', 'Unknown')
-            if venue:
-                venue_counts[venue] = venue_counts.get(venue, 0) + 1
-        
-        top_venues = sorted(
-            venue_counts.items(),
-            key=lambda x: x[1],
-            reverse=True
-        )[:10]
-        
-        return {
-            'venues': [v for v, c in top_venues],
-            'counts': [c for v, c in top_venues],
-        }
-    
-    def _analyze_collaboration(self, papers: List[Dict]) -> Dict:
-        """分析合作网络"""
-        author_counts = {}
-        
+        # 2. 作者分布（高产作者）
+        all_authors = []
         for paper in papers:
             authors = paper.get('authors', [])
-            for author in authors:
-                if isinstance(author, dict):
-                    name = author.get('name', '')
-                else:
-                    name = str(author)
-                
-                if name:
-                    author_counts[name] = author_counts.get(name, 0) + 1
+            all_authors.extend(authors)
         
-        top_authors = sorted(
-            author_counts.items(),
-            key=lambda x: x[1],
-            reverse=True
-        )[:20]
+        if all_authors:
+            author_counts = Counter(all_authors)
+            top_authors = dict(author_counts.most_common(20))
+            trends['author_distribution'] = top_authors
         
-        return {
-            'top_authors': [a for a, c in top_authors],
-            'paper_counts': [c for a, c in top_authors],
-            'total_authors': len(author_counts),
-        }
-
-
-class AnalysisAgent:
-    """
-    分析智能体
-    
-    核心职责：
-    1. 文献质量评分
-    2. 关键信息提取
-    3. 趋势分析
-    4. 研究空白识别
-    """
-    
-    def __init__(self):
-        """初始化分析智能体"""
-        self.scorer = PaperQualityScorer()
-        self.extractor = KeyInformationExtractor()
-        self.trend_analyzer = TrendAnalyzer()
+        # 3. 来源分布
+        sources = [p.get('source') for p in papers if p.get('source')]
+        if sources:
+            source_counts = Counter(sources)
+            trends['source_distribution'] = dict(source_counts)
         
-        logger.info("分析智能体初始化完成")
+        # 4. 引用趋势（按年份）
+        citation_by_year = {}
+        for paper in papers:
+            year = paper.get('year')
+            citations = paper.get('citationCount', 0)
+            if year and citations:
+                if year not in citation_by_year:
+                    citation_by_year[year] = []
+                citation_by_year[year].append(citations)
+        
+        # 计算每年的平均引用数
+        for year, citations in citation_by_year.items():
+            citation_by_year[year] = {
+                'avg_citations': np.mean(citations),
+                'total_citations': sum(citations),
+                'paper_count': len(citations),
+            }
+        
+        trends['citation_trends'] = dict(sorted(citation_by_year.items()))
+        
+        return trends
     
-    async def analyze_papers(
-        self,
-        papers: List[Dict],
-        include_trends: bool = True,
-    ) -> Dict[str, Any]:
+    def _calculate_statistics(self, papers: List[Dict]) -> Dict:
         """
-        分析文献集合
+        计算基础统计信息
         
         Args:
             papers: 文献列表
-            include_trends: 是否包含趋势分析
         
         Returns:
-            Dict: 分析结果
+            Dict: 统计信息
         """
-        logger.info(f"开始分析 {len(papers)} 篇文献")
-        
-        # 1. 质量评分
-        scored_papers = []
-        for paper in papers:
-            score = self.scorer.score_paper(paper)
-            paper['quality_score'] = score
-            scored_papers.append(paper)
-        
-        # 按质量分数排序
-        scored_papers.sort(key=lambda x: x['quality_score'], reverse=True)
-        
-        # 2. 提取关键信息
-        extracted_info = []
-        for paper in scored_papers[:100]:  # 只处理前100篇
-            info = self.extractor.extract(paper)
-            info['quality_score'] = paper['quality_score']
-            extracted_info.append(info)
-        
-        # 3. 趋势分析
-        trends = {}
-        if include_trends:
-            trends = self.trend_analyzer.analyze_trends(scored_papers)
-        
-        # 4. 统计信息
-        quality_scores = [p['quality_score'] for p in scored_papers]
-        
-        result = {
+        stats = {
             'total_papers': len(papers),
-            'analyzed_papers': len(scored_papers),
-            'quality_statistics': {
-                'average_score': round(np.mean(quality_scores), 2),
-                'median_score': round(np.median(quality_scores), 2),
-                'high_quality_count': sum(1 for s in quality_scores if s >= 80),
-                'medium_quality_count': sum(1 for s in quality_scores if 60 <= s < 80),
-                'low_quality_count': sum(1 for s in quality_scores if s < 60),
-            },
-            'top_papers': extracted_info[:20],
-            'trends': trends,
-            'timestamp': datetime.now().isoformat(),
+            'papers_with_abstract': 0,
+            'papers_with_citations': 0,
+            'total_citations': 0,
+            'avg_citations': 0,
+            'year_range': {},
+            'avg_authors_per_paper': 0,
         }
         
-        logger.success(f"文献分析完成，平均质量分: {result['quality_statistics']['average_score']}")
+        if not papers:
+            return stats
         
-        return result
+        # 统计摘要
+        stats['papers_with_abstract'] = sum(1 for p in papers if p.get('abstract'))
+        
+        # 统计引用
+        citations = [p.get('citationCount', 0) for p in papers]
+        stats['papers_with_citations'] = sum(1 for c in citations if c > 0)
+        stats['total_citations'] = sum(citations)
+        stats['avg_citations'] = np.mean(citations) if citations else 0
+        
+        # 年份范围
+        years = [p.get('year') for p in papers if p.get('year')]
+        if years:
+            stats['year_range'] = {
+                'min': min(years),
+                'max': max(years),
+                'span': max(years) - min(years) + 1,
+            }
+        
+        # 平均作者数
+        author_counts = [len(p.get('authors', [])) for p in papers]
+        stats['avg_authors_per_paper'] = np.mean(author_counts) if author_counts else 0
+        
+        return stats
     
     def filter_by_quality(
         self,
         papers: List[Dict],
-        min_score: float = 60.0,
+        min_score: float = 40.0,
     ) -> List[Dict]:
         """
-        按质量过滤文献
+        根据质量分数过滤文献
         
         Args:
-            papers: 文献列表
+            papers: 文献列表（需要包含quality_score）
             min_score: 最低质量分数
         
         Returns:
-            List[Dict]: 过滤后的文献
+            List[Dict]: 过滤后的文献列表
         """
-        filtered = []
-        
-        for paper in papers:
-            if 'quality_score' not in paper:
-                paper['quality_score'] = self.scorer.score_paper(paper)
-            
-            if paper['quality_score'] >= min_score:
-                filtered.append(paper)
-        
-        logger.info(f"质量过滤：{len(papers)} -> {len(filtered)} 篇（阈值: {min_score}）")
-        
+        filtered = [p for p in papers if p.get('quality_score', 0) >= min_score]
+        logger.info(f"质量过滤: {len(papers)} -> {len(filtered)} 篇（阈值: {min_score}）")
         return filtered
+    
+    def extract_key_findings(self, papers: List[Dict], top_n: int = 10) -> List[Dict]:
+        """
+        提取关键发现（基于高质量文献的摘要）
+        
+        Args:
+            papers: 文献列表
+            top_n: 返回前N个关键发现
+        
+        Returns:
+            List[Dict]: 关键发现列表
+        """
+        # 按质量分数排序
+        sorted_papers = sorted(
+            papers,
+            key=lambda x: x.get('quality_score', 0),
+            reverse=True
+        )[:top_n]
+        
+        findings = []
+        for paper in sorted_papers:
+            finding = {
+                'title': paper.get('title'),
+                'authors': paper.get('authors', [])[:3],  # 前3位作者
+                'year': paper.get('year'),
+                'abstract': paper.get('abstract', '')[:300],  # 前300字符
+                'quality_score': paper.get('quality_score'),
+                'citations': paper.get('citationCount', 0),
+                'source': paper.get('source'),
+            }
+            findings.append(finding)
+        
+        return findings
 
 
 # 创建全局分析智能体实例
