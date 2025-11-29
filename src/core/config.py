@@ -8,10 +8,16 @@
 import os
 from pathlib import Path
 from typing import List, Optional
-from pydantic import BaseSettings, Field, validator
+from pydantic import Field, validator
+
+# Pydantic v2 兼容性处理
+try:
+    from pydantic_settings import BaseSettings
+except ImportError:
+    from pydantic import BaseSettings
 
 
-class Settings(BaseSettings):
+class 设置(BaseSettings):
     """系统配置类"""
     
     # ============ 基础配置 ============
@@ -37,6 +43,7 @@ class Settings(BaseSettings):
     
     # ============ 数据库配置 ============
     SQLITE_PATH: str = Field(default="./data/metadata.db", env="SQLITE_PATH")
+    SQLITE_DB_PATH: str = Field(default="./data/metadata.db", env="SQLITE_PATH")  # 别名兼容
     
     NEO4J_URI: str = Field(default="bolt://localhost:7687", env="NEO4J_URI")
     NEO4J_USER: str = Field(default="neo4j", env="NEO4J_USER")
