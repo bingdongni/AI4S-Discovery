@@ -17,7 +17,7 @@ except ImportError:
     from pydantic import BaseSettings
 
 
-class 设置(BaseSettings):
+class Settings(BaseSettings):
     """系统配置类"""
     
     # ============ 基础配置 ============
@@ -74,6 +74,23 @@ class 设置(BaseSettings):
     IEEE_API_KEY: Optional[str] = Field(default=None, env="IEEE_API_KEY")
     SPRINGER_API_KEY: Optional[str] = Field(default=None, env="SPRINGER_API_KEY")
     ELSEVIER_API_KEY: Optional[str] = Field(default=None, env="ELSEVIER_API_KEY")
+    
+    # ============ LLM配置 ============
+    # OpenAI API配置
+    OPENAI_API_KEY: Optional[str] = Field(default=None, env="OPENAI_API_KEY")
+    OPENAI_API_BASE: str = Field(default="https://api.openai.com/v1", env="OPENAI_API_BASE")
+    OPENAI_MODEL: str = Field(default="gpt-3.5-turbo", env="OPENAI_MODEL")
+    OPENAI_MAX_TOKENS: int = Field(default=2048, env="OPENAI_MAX_TOKENS")
+    OPENAI_TEMPERATURE: float = Field(default=0.7, env="OPENAI_TEMPERATURE")
+    
+    # 本地模型配置
+    USE_LOCAL_MODEL: bool = Field(default=False, env="USE_LOCAL_MODEL")
+    LOCAL_MODEL_PATH: str = Field(default="./models/minicpm", env="LOCAL_MODEL_PATH")
+    
+    # LLM通用配置
+    LLM_PROVIDER: str = Field(default="openai", env="LLM_PROVIDER")  # openai, local, azure
+    LLM_MAX_RETRIES: int = Field(default=3, env="LLM_MAX_RETRIES")
+    LLM_TIMEOUT: int = Field(default=60, env="LLM_TIMEOUT")
     
     # ============ 模型配置 ============
     MODEL_PATH: str = Field(default="./models", env="MODEL_PATH")
@@ -167,6 +184,11 @@ class 设置(BaseSettings):
     HYPOTHESIS_COUNT: int = Field(default=5, env="HYPOTHESIS_COUNT")
     HYPOTHESIS_MIN_CONFIDENCE: float = Field(default=0.7, env="HYPOTHESIS_MIN_CONFIDENCE")
     HYPOTHESIS_TEMPERATURE: float = Field(default=0.8, env="HYPOTHESIS_TEMPERATURE")
+    HYPOTHESIS_MAX_TOKENS: int = Field(default=1024, env="HYPOTHESIS_MAX_TOKENS")
+    
+    # ============ 反事实推理配置 ============
+    COUNTERFACTUAL_SCENARIOS: int = Field(default=3, env="COUNTERFACTUAL_SCENARIOS")
+    COUNTERFACTUAL_DEPTH: int = Field(default=2, env="COUNTERFACTUAL_DEPTH")
     
     # ============ 开发配置 ============
     ENABLE_DEBUG: bool = Field(default=False, env="ENABLE_DEBUG")
