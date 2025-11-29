@@ -58,6 +58,7 @@ pyecharts==2.0.4
 arxiv==2.1.0
 biopython==1.81
 scholarly==1.7.11
+openai>=1.0.0
 
 # ============ 工具库 ============
 tqdm==4.66.1
