@@ -16,6 +16,8 @@ from src.core.config import settings
 from src.utils.device_manager import device_manager
 from src.agents.search_agent import search_agent
 from src.agents.analysis_agent import analysis_agent
+from src.agents.relation_agent import relation_agent
+from src.agents.evaluate_agent import evaluate_agent
 from src.database.sqlite_manager import db_manager
 
 
@@ -318,16 +320,41 @@ class CoordinatorAgent:
         """
         logger.info(f"[{task.task_id}] 阶段4: 构建知识图谱")
         
-        # 这里会调用关联智能体
-        # 构建研究演进图谱
-        
-        task.results["knowledge_graph"] = {
-            "nodes": 0,
-            "edges": 0,
-            "clusters": [],
-        }
-        
-        await asyncio.sleep(1.2)  # 模拟处理时间
+        try:
+            papers = task.results.get("literature", {}).get("papers", [])
+            
+            if not papers:
+                logger.warning("没有文献可供构建图谱")
+                task.results["knowledge_graph"] = {
+                    "nodes": 0,
+                    "edges": 0,
+                    "clusters": [],
+                }
+                return
+            
+            # 调用关联智能体构建知识图谱
+            graph_result = await relation_agent.build_knowledge_graph(
+                papers=papers,
+                include_citations=True,
+                include_similarity=True,
+                max_nodes=settings.GRAPH_MAX_NODES if len(papers) > 1000 else None,
+            )
+            
+            task.results["knowledge_graph"] = graph_result
+            
+            logger.success(
+                f"知识图谱构建完成: {graph_result['nodes']}节点, "
+                f"{graph_result['edges']}边, {len(graph_result['clusters'])}聚类"
+            )
+            
+        except Exception as e:
+            logger.error(f"知识图谱构建失败: {e}")
+            task.results["knowledge_graph"] = {
+                "nodes": 0,
+                "edges": 0,
+                "clusters": [],
+                "error": str(e),
+            }
     
     async def _assess_trl(self, task: ResearchTask):
         """
@@ -338,16 +365,48 @@ class CoordinatorAgent:
         """
         logger.info(f"[{task.task_id}] 阶段5: TRL评估")
         
-        # 这里会调用评估智能体
-        # 进行TRL 1-9级评估
-        
-        task.results["trl_assessment"] = {
-            "level": 0,
-            "confidence": 0.0,
-            "evidence": [],
-        }
-        
-        await asyncio.sleep(0.6)  # 模拟处理时间
+        try:
+            papers = task.results.get("literature", {}).get("papers", [])
+            analysis = task.results.get("analysis", {})
+            
+            if not papers:
+                logger.warning("没有文献可供TRL评估")
+                task.results["trl_assessment"] = {
+                    "level": 0,
+                    "confidence": 0.0,
+                    "evidence": [],
+                }
+                return
+            
+            # 调用评估智能体进行TRL评估
+            trl_result = await evaluate_agent.assess_trl(
+                papers=papers,
+                query=task.query,
+                analysis_results=analysis,
+            )
+            
+            # 评估技术可行性
+            feasibility = evaluate_agent.assess_feasibility(
+                trl_result=trl_result,
+                analysis_results=analysis,
+            )
+            
+            task.results["trl_assessment"] = trl_result
+            task.results["feasibility"] = feasibility
+            
+            logger.success(
+                f"TRL评估完成: Level {trl_result['level']} "
+                f"(置信度: {trl_result['confidence']:.2%})"
+            )
+            
+        except Exception as e:
+            logger.error(f"TRL评估失败: {e}")
+            task.results["trl_assessment"] = {
+                "level": 0,
+                "confidence": 0.0,
+                "evidence": [],
+                "error": str(e),
+            }
     
     async def _generate_hypotheses(self, task: ResearchTask):
         """
