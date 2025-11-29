@@ -8,23 +8,24 @@
 
 ## 🌟 核心特性
 
-### 学术级创新能力
-- **动态研究演进图谱构建**：基于时序图神经网络提取文献关键信息，构建百万级节点图谱
-- **技术成熟度（TRL）评估**：自动评估研究方向的成熟度（1-9级），准确率≥88%
-- **顶刊级创新假设生成**：通过反事实推理生成可验证的创新假设，导师认可度≥85%
-- **跨域知识迁移推荐**：基于图谱嵌入相似度推荐跨领域方法迁移
+### 核心功能
+- **知识图谱构建**：基于NetworkX构建文献引用关系图谱，支持社区检测和中心性分析
+- **技术成熟度（TRL）评估**：自动评估研究方向的成熟度（1-9级），采用多方法融合策略
+- **LLM驱动的创新假设生成**：集成OpenAI GPT和本地MiniCPM模型，通过反事实推理生成创新假设
+- **智能反事实推理**：分析不同条件下的研究结果，评估风险和成功概率
+- **跨域知识迁移推荐**：基于图谱分析和LLM推理，推荐跨领域方法迁移
 
-### 工业级可靠性
-- **7×24小时无间断运行**：服务可用性≥99.9%，自动故障恢复
-- **高效文献处理**：日均处理学术文献≥5万篇，支持20+学术数据源
-- **低延迟响应**：复杂查询延迟 CPU≤800ms，GPU≤300ms
-- **智能反爬与质量保障**：适配学术数据库反爬机制，文献质量评分准确率≥90%
+### 技术特点
+- **多智能体架构**：搜索、分析、关联、评估、生成智能体协同工作
+- **多源文献聚合**：支持arXiv、PubMed、Semantic Scholar等学术数据源
+- **异步处理**：基于asyncio的高效异步架构
+- **智能降级**：无API密钥时自动切换到模拟模式，保证系统可用
 
-### 企业级实用性
-- **私有化部署**：支持Windows离线部署，数据本地加密存储（AES-256）
-- **标准化API**：提供RESTful API，可快速对接企业研发管理系统
-- **定制化报告模板**：预设5大类报告模板，支持自定义章节结构
-- **细粒度权限管控**：三级权限配置，操作日志留存≥6个月
+### 部署支持
+- **灵活部署**：支持Windows本地部署，提供Docker容器化方案
+- **API接口**：提供RESTful API，支持程序化调用
+- **多格式报告**：支持Markdown、HTML格式报告生成
+- **配置灵活**：支持CPU/GPU模式，本地模型/云端API可选
 
 ## 🚀 快速开始
 
@@ -60,14 +61,21 @@ pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
 ```bash
 copy .env.example .env
 # 编辑 .env 文件，配置必要的参数
+# 重要：配置OpenAI API密钥以启用LLM功能
+# OPENAI_API_KEY=your_api_key_here
 ```
 
-5. **初始化数据库**
+5. **下载模型（可选，用于本地LLM）**
+```bash
+python scripts/download_models.py
+```
+
+6. **初始化数据库**
 ```bash
 python scripts/init_database.py
 ```
 
-6. **启动服务**
+7. **启动服务**
 ```bash
 # Web界面模式
 python main.py --mode web
@@ -130,40 +138,106 @@ result = requests.get(f'http://localhost:8000/api/v1/research/result/{task_id}')
 ### 3. 通过Python SDK使用
 
 ```python
-from ai4s_discovery import ResearchAssistant
+from src.agents.coordinator_agent import coordinator, ResearchTask
 
-# 初始化助手
-assistant = ResearchAssistant(
-    device='auto',  # 自动选择CPU/GPU
-    cache_dir='./cache'
-)
-
-# 执行研究任务
-result = assistant.research(
+# 创建研究任务
+task = ResearchTask(
+    task_id='task_001',
     query='探索二维材料在芯片散热中的应用',
+    domains=['materials_science', 'thermal_engineering'],
+    depth='comprehensive',
     include_patents=True,
-    generate_hypotheses=True,
+    generate_hypotheses=True,  # 启用LLM驱动的假设生成
     trl_assessment=True
 )
 
-# 导出报告
-result.export_report(
-    format='pdf',
-    template='research_proposal',
-    output_path='./reports/chip_cooling_research.pdf'
-)
+# 提交任务
+task_id = await coordinator.submit_task(task)
+
+# 查询任务状态
+status = coordinator.get_task_status(task_id)
+print(f"进度: {status['progress']*100:.1f}%")
+
+# 获取结果
+result = coordinator.get_task_result(task_id)
+
+# 结果包含：
+# - literature: 文献搜索结果
+# - analysis: 质量分析和趋势
+# - knowledge_graph: 知识图谱
+# - trl_assessment: TRL评估
+# - innovations: 创新假设、反事实推理、跨域迁移
+# - report: 生成的报告路径
 ```
 
-## 📊 性能指标
+### 4. LLM配置选项
 
-| 指标 | CPU模式 | GPU模式 | 说明 |
-|------|---------|---------|------|
-| 文献处理速度 | 5万篇/天 | 10万篇/天 | 包含PDF解析、去重、评分 |
-| 查询响应延迟 | ≤800ms | ≤300ms | 复杂查询端到端延迟 |
-| 图谱构建速度 | 5秒/千节点 | 1.5秒/千节点 | 时序图神经网络 |
-| 假设生成延迟 | 1.2秒/假设 | 0.3秒/假设 | 基于MiniCPM-2B |
-| 内存占用 | ≤12GB | ≤14GB | 峰值内存使用 |
-| 服务可用性 | 99.9% | 99.9% | 7×24小时运行 |
+```python
+# 方式1: 使用OpenAI API（推荐）
+# 在.env文件中配置：
+# OPENAI_API_KEY=your_api_key_here
+# OPENAI_MODEL=gpt-3.5-turbo
+# LLM_PROVIDER=openai
+
+# 方式2: 使用本地模型
+# 在.env文件中配置：
+# USE_LOCAL_MODEL=True
+# LOCAL_MODEL_PATH=./models/minicpm
+# LLM_PROVIDER=local
+
+# 方式3: 无API密钥模式（自动降级）
+# 系统会自动使用模拟模式，仍可运行但功能受限
+```
+
+## 🎯 核心功能详解
+
+### 1. 智能文献搜索与分析
+- **多源聚合**: 支持arXiv、PubMed、Semantic Scholar等主流学术数据库
+- **智能去重**: 基于标题相似度的高效去重算法
+- **质量评分**: 多维度评分（引用数、作者、期刊、年份）
+- **关键词提取**: TF-IDF算法提取研究热点
+- **趋势分析**: 年度分布、高产作者、研究演进
+
+### 2. 知识图谱构建
+- **图谱构建**: NetworkX构建有向引用图
+- **社区检测**: Louvain算法识别研究社区
+- **中心性分析**: 度中心性、介数中心性、PageRank
+- **关键节点**: 自动识别领域内的重要文献
+
+### 3. TRL技术成熟度评估
+- **9级评估**: TRL 1-9级精确评估
+- **多方法融合**: 关键词匹配、实验阶段识别、时间演进分析
+- **可行性分析**: 技术、资源、时间三维评估
+- **里程碑规划**: 自动生成技术发展路线图
+
+### 4. LLM驱动的创新生成
+- **假设生成**: 基于研究空白，LLM生成创新假设
+- **反事实推理**: 分析不同条件下的可能结果
+- **风险评估**: 识别潜在风险和成功概率
+- **资源估算**: 自动估算所需资金、人力、时间
+- **跨域迁移**: 推荐知识迁移方案和实施步骤
+
+### 5. 智能报告生成
+- **多格式输出**: Markdown、HTML、PDF（规划中）
+- **结构化内容**: 文献统计、分析结果、图谱、TRL、假设、反事实
+- **可视化**: 表格、图表、关键词云
+- **自定义模板**: 支持自定义报告结构
+
+## 📊 参考性能指标
+
+以下为开发环境测试数据，实际性能取决于硬件配置和网络环境：
+
+| 指标 | 典型值 | 说明 |
+|------|--------|------|
+| 文献搜索 | 50-100篇/次 | 取决于数据源API限制 |
+| 质量分析 | 100篇/分钟 | 包含评分和关键词提取 |
+| 图谱构建 | 1000节点/分钟 | NetworkX + Louvain算法 |
+| LLM假设生成 | 2-10秒/假设 | 取决于LLM提供商和网络 |
+| 反事实推理 | 5-15秒/场景 | LLM驱动的多场景分析 |
+| 报告生成 | 1-3秒 | Markdown/HTML格式 |
+| 内存占用 | 8-12GB | 取决于数据量和模型 |
+
+**注意**：性能数据仅供参考，实际使用中会受到多种因素影响。
 
 ## 🤝 贡献指南
 
@@ -177,7 +251,6 @@ result.export_report(
 
 - **项目主页**：https://github.com/bingdongni/AI4S-Discovery
 - **问题反馈**：https://github.com/bingdongni/AI4S-Discovery/issues
-
 ---
 
 **注意**：本项目为单人开发的全功能科研辅助工具，专为Windows 11环境优化，支持CPU/GPU双模式运行。
