@@ -18,7 +18,9 @@ from src.agents.search_agent import search_agent
 from src.agents.analysis_agent import analysis_agent
 from src.agents.relation_agent import relation_agent
 from src.agents.evaluate_agent import evaluate_agent
+from src.agents.generate_agent import generate_agent
 from src.database.sqlite_manager import db_manager
+from src.utils.report_generator import report_generator
 
 
 class TaskStatus(Enum):
@@ -161,9 +163,9 @@ class CoordinatorAgent:
                 await self._assess_trl(task)
             task.progress = 0.8
             
-            # 阶段6: 创新假设生成（如果需要） (10%)
+            # 阶段6: 创新假设生成和反事实推理（如果需要） (10%)
             if task.generate_hypotheses:
-                await self._generate_hypotheses(task)
+                await self._generate_innovations(task)
             task.progress = 0.9
             
             # 阶段7: 报告生成 (10%)
@@ -408,21 +410,106 @@ class CoordinatorAgent:
                 "error": str(e),
             }
     
-    async def _generate_hypotheses(self, task: ResearchTask):
+    async def _generate_innovations(self, task: ResearchTask):
         """
-        生成创新假设
+        生成创新建议（假设生成 + 反事实推理）
         
         Args:
             task: 研究任务对象
         """
-        logger.info(f"[{task.task_id}] 阶段6: 生成创新假设")
+        logger.info(f"[{task.task_id}] 阶段6: 生成创新建议（LLM驱动）")
         
-        # 这里会调用生成智能体
-        # 通过反事实推理生成假设
+        try:
+            papers = task.results.get("literature", {}).get("papers", [])
+            analysis = task.results.get("analysis", {})
+            graph = task.results.get("knowledge_graph", {})
+            trl = task.results.get("trl_assessment", {})
+            
+            if not papers:
+                logger.warning("没有文献可供生成假设")
+                task.results["innovations"] = {
+                    "hypotheses": [],
+                    "counterfactual_reasoning": [],
+                    "cross_domain_transfers": [],
+                }
+                return
+            
+            # 从分析结果中提取研究空白
+            research_gaps = self._extract_research_gaps(analysis, graph)
+            
+            # 调用生成智能体
+            innovations = await generate_agent.generate_innovations(
+                research_gaps=research_gaps,
+                papers=papers,
+                domains=task.domains,
+                trl_results=[trl] if trl else None,
+            )
+            
+            task.results["innovations"] = innovations
+            
+            logger.success(
+                f"创新建议生成完成: {len(innovations.get('hypotheses', []))} 个假设, "
+                f"{len(innovations.get('counterfactual_reasoning', []))} 个反事实分析, "
+                f"{len(innovations.get('cross_domain_transfers', []))} 个跨域迁移"
+            )
+            
+        except Exception as e:
+            logger.error(f"创新建议生成失败: {e}")
+            task.results["innovations"] = {
+                "hypotheses": [],
+                "counterfactual_reasoning": [],
+                "cross_domain_transfers": [],
+                "error": str(e),
+            }
+    
+    def _extract_research_gaps(self, analysis: Dict, graph: Dict) -> List[Dict]:
+        """
+        从分析结果中提取研究空白
         
-        task.results["hypotheses"] = []
+        Args:
+            analysis: 分析结果
+            graph: 知识图谱结果
         
-        await asyncio.sleep(1.0)  # 模拟处理时间
+        Returns:
+            List[Dict]: 研究空白列表
+        """
+        gaps = []
+        
+        # 从关键词中识别研究不足的概念
+        keywords = analysis.get('keywords', [])
+        for kw in keywords[:10]:
+            if kw.get('frequency', 0) < 5:  # 低频关键词可能是研究不足的领域
+                gaps.append({
+                    'type': 'under_researched_concept',
+                    'concept': kw.get('term', ''),
+                    'paper_count': kw.get('frequency', 0),
+                    'priority': 'high' if kw.get('tfidf_score', 0) > 0.1 else 'medium',
+                })
+        
+        # 从图谱社区中识别跨域机会
+        communities = graph.get('communities', [])
+        if len(communities) >= 2:
+            for i in range(min(len(communities) - 1, 3)):
+                comm1 = communities[i]
+                comm2 = communities[i + 1]
+                gaps.append({
+                    'type': 'missing_cross_domain',
+                    'concepts': [
+                        comm1.get('topics', ['领域A'])[0],
+                        comm2.get('topics', ['领域B'])[0],
+                    ],
+                    'priority': 'medium',
+                })
+        
+        # 如果没有发现空白，创建默认空白
+        if not gaps:
+            gaps.append({
+                'type': 'general_research_gap',
+                'concept': '新兴研究方向',
+                'priority': 'medium',
+            })
+        
+        return gaps[:5]  # 最多返回5个研究空白
     
     async def _generate_report(self, task: ResearchTask):
         """
@@ -433,16 +520,48 @@ class CoordinatorAgent:
         """
         logger.info(f"[{task.task_id}] 阶段7: 生成报告")
         
-        # 这里会调用报告智能体
-        # 生成结构化报告
-        
-        task.results["report"] = {
-            "format": "markdown",
-            "content": "",
-            "sections": [],
-        }
-        
-        await asyncio.sleep(0.5)  # 模拟处理时间
+        try:
+            # 准备报告数据
+            report_data = {
+                "literature": task.results.get("literature", {}),
+                "analysis": task.results.get("analysis", {}),
+                "knowledge_graph": task.results.get("knowledge_graph", {}),
+                "trl_assessment": task.results.get("trl_assessment", {}),
+                "innovations": task.results.get("innovations", {}),
+            }
+            
+            # 生成Markdown报告
+            output_path = settings.REPORT_DIR / f"report_{task.task_id}.md"
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            
+            report_generator.generate(
+                result=report_data,
+                output_path=str(output_path),
+                format='markdown',
+            )
+            
+            # 同时生成HTML版本
+            html_path = settings.REPORT_DIR / f"report_{task.task_id}.html"
+            report_generator.generate(
+                result=report_data,
+                output_path=str(html_path),
+                format='html',
+            )
+            
+            task.results["report"] = {
+                "format": "markdown",
+                "markdown_path": str(output_path),
+                "html_path": str(html_path),
+                "generated_at": datetime.now().isoformat(),
+            }
+            
+            logger.success(f"报告已生成: {output_path}")
+            
+        except Exception as e:
+            logger.error(f"报告生成失败: {e}")
+            task.results["report"] = {
+                "error": str(e),
+            }
     
     def get_task_status(self, task_id: str) -> Optional[Dict]:
         """
