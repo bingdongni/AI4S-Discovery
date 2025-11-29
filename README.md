@@ -175,8 +175,8 @@ result.export_report(
 
 ## 📞 联系方式
 
-- **项目主页**：https://github.com/yourusername/AI4S-Discovery
-- **问题反馈**：https://github.com/yourusername/AI4S-Discovery/issues
+- **项目主页**：https://github.com/bingdongni/AI4S-Discovery
+- **问题反馈**：https://github.com/bingdongni/AI4S-Discovery/issues
 
 ---
 
