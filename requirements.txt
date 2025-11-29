@@ -1,0 +1,112 @@
+# AI4S-Discovery 依赖包列表
+# 使用清华镜像源安装: pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
+
+# ============ 核心框架 ============
+fastapi==0.104.1
+uvicorn[standard]==0.24.0
+streamlit==1.28.1
+pydantic==2.5.0
+python-dotenv==1.0.0
+
+# ============ 数据处理 ============
+pandas==2.1.3
+numpy==1.24.3
+scipy==1.11.4
+
+# ============ 机器学习与深度学习 ============
+torch==2.1.1
+transformers==4.35.2
+sentence-transformers==2.2.2
+scikit-learn==1.3.2
+
+# ============ 图神经网络 ============
+torch-geometric==2.4.0
+networkx==3.2.1
+neo4j==5.14.1
+
+# ============ 数据库 ============
+sqlalchemy==2.0.23
+redis==5.0.1
+chromadb==0.4.18
+
+# ============ 网络爬虫 ============
+requests==2.31.0
+aiohttp==3.9.1
+beautifulsoup4==4.12.2
+lxml==4.9.3
+selenium==4.15.2
+
+# ============ PDF处理 ============
+PyPDF2==3.0.1
+pdfplumber==0.10.3
+pymupdf==1.23.8
+
+# ============ 自然语言处理 ============
+nltk==3.8.1
+spacy==3.7.2
+jieba==0.42.1
+
+# ============ 数据可视化 ============
+matplotlib==3.8.2
+seaborn==0.13.0
+plotly==5.18.0
+pyecharts==2.0.4
+
+# ============ API客户端 ============
+arxiv==2.1.0
+biopython==1.81
+scholarly==1.7.11
+
+# ============ 工具库 ============
+tqdm==4.66.1
+loguru==0.7.2
+pyyaml==6.0.1
+click==8.1.7
+python-multipart==0.0.6
+
+# ============ 安全与加密 ============
+cryptography==41.0.7
+pyjwt==2.8.0
+passlib[bcrypt]==1.7.4
+
+# ============ 测试 ============
+pytest==7.4.3
+pytest-asyncio==0.21.1
+pytest-cov==4.1.0
+httpx==0.25.2
+
+# ============ 监控与性能 ============
+prometheus-client==0.19.0
+psutil==5.9.6
+
+# ============ 文档生成 ============
+jinja2==3.1.2
+markdown==3.5.1
+reportlab==4.0.7
+
+# ============ 其他工具 ============
+python-dateutil==2.8.2
+pytz==2023.3
+tenacity==8.2.3
+# 向量数据库与语义搜索
+faiss-cpu>=1.7.4
+sentence-transformers>=2.2.2
+
+# 加密
+cryptography>=41.0.0
+
+# 报告生成
+jinja2>=3.1.2
+markdown>=3.4.0
+weasyprint>=59.0
+
+# 认证与安全
+pyjwt>=2.8.0
+
+# 监控
+prometheus-client>=0.17.0
+
+# LLM模型支持
+transformers>=4.30.0
+bitsandbytes>=0.41.0
+accelerate>=0.20.0

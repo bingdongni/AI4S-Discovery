@@ -1,0 +1,68 @@
+version: '3.8'
+
+services:
+  # 主应用服务
+  ai4s-discovery:
+    build: .
+    container_name: ai4s-discovery
+    ports:
+      - "8000:8000"  # API服务
+      - "8501:8501"  # Web界面
+      - "9090:9090"  # Prometheus监控
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+      - ./models:/app/models
+      - ./cache:/app/cache
+      - ./reports:/app/reports
+    environment:
+      - DEVICE=auto
+      - DEBUG=False
+      - NEO4J_URI=bolt://neo4j:7687
+      - REDIS_HOST=redis
+    depends_on:
+      - neo4j
+      - redis
+    restart: unless-stopped
+    networks:
+      - ai4s-network
+
+  # Neo4j图数据库
+  neo4j:
+    image: neo4j:5.14-community
+    container_name: ai4s-neo4j
+    ports:
+      - "7474:7474"  # HTTP
+      - "7687:7687"  # Bolt
+    volumes:
+      - neo4j-data:/data
+      - neo4j-logs:/logs
+    environment:
+      - NEO4J_AUTH=neo4j/your_password_here
+      - NEO4J_dbms_memory_pagecache_size=512M
+      - NEO4J_dbms_memory_heap_max__size=1G
+    restart: unless-stopped
+    networks:
+      - ai4s-network
+
+  # Redis缓存
+  redis:
+    image: redis:7-alpine
+    container_name: ai4s-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    command: redis-server --appendonly yes
+    restart: unless-stopped
+    networks:
+      - ai4s-network
+
+volumes:
+  neo4j-data:
+  neo4j-logs:
+  redis-data:
+
+networks:
+  ai4s-network:
+    driver: bridge
