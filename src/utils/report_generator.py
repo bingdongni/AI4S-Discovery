@@ -185,30 +185,195 @@ class ReportGenerator:
                                f"**引用**: {finding.get('citations', 0)}")
                     lines.append(f"\n**摘要**: {finding.get('abstract', '')}\n")
         
-        # 3. 知识图谱
+        # 3. 知识图谱分析
         graph = result.get('knowledge_graph', {})
         if graph:
-            lines.append("## 🕸️ 知识图谱\n")
-            lines.append(f"- 节点数: {graph.get('nodes', 0)}")
-            lines.append(f"- 边数: {graph.get('edges', 0)}")
-            lines.append(f"- 聚类数: {len(graph.get('clusters', []))}")
+            lines.append("## 🕸️ 知识图谱分析\n")
+            
+            # 基本统计
+            lines.append("### 图谱统计")
+            lines.append(f"- **节点数**: {graph.get('node_count', 0)}")
+            lines.append(f"- **边数**: {graph.get('edge_count', 0)}")
+            lines.append(f"- **平均度**: {graph.get('avg_degree', 0):.2f}")
+            lines.append(f"- **图密度**: {graph.get('density', 0):.4f}")
             lines.append("")
+            
+            # 社区结构
+            communities = graph.get('communities', [])
+            if communities:
+                lines.append("### 研究社区")
+                lines.append(f"发现 {len(communities)} 个研究社区：\n")
+                for idx, comm in enumerate(communities[:5], 1):
+                    lines.append(f"#### 社区 {idx}")
+                    lines.append(f"- 规模: {comm.get('size', 0)} 个节点")
+                    lines.append(f"- 核心主题: {', '.join(comm.get('topics', [])[:5])}")
+                    lines.append(f"- 代表文献: {comm.get('representative_papers', ['N/A'])[0]}")
+                    lines.append("")
+            
+            # 关键节点
+            key_nodes = graph.get('key_nodes', [])
+            if key_nodes:
+                lines.append("### 关键节点（Top 10）\n")
+                lines.append("| 排名 | 文献 | 度中心性 | 介数中心性 | PageRank |")
+                lines.append("|------|------|----------|------------|----------|")
+                for idx, node in enumerate(key_nodes[:10], 1):
+                    lines.append(f"| {idx} | {node.get('title', '')[:50]}... | "
+                               f"{node.get('degree_centrality', 0):.4f} | "
+                               f"{node.get('betweenness_centrality', 0):.4f} | "
+                               f"{node.get('pagerank', 0):.4f} |")
+                lines.append("")
         
-        # 4. TRL评估
+        # 4. TRL技术成熟度评估
         trl = result.get('trl_assessment', {})
-        if trl and trl.get('level'):
-            lines.append("## 📈 技术成熟度评估\n")
-            lines.append(f"- **TRL等级**: {trl.get('level', 0)}")
+        if trl:
+            lines.append("## 📊 技术成熟度评估（TRL）\n")
+            
+            # 总体评估
+            lines.append("### 总体评估")
+            lines.append(f"- **TRL等级**: {trl.get('trl_level', 'N/A')}")
             lines.append(f"- **置信度**: {trl.get('confidence', 0):.2%}")
+            lines.append(f"- **评估方法**: {trl.get('method', 'N/A')}")
             lines.append("")
+            
+            # TRL分布
+            distribution = trl.get('distribution', {})
+            if distribution:
+                lines.append("### TRL等级分布\n")
+                lines.append("| TRL等级 | 文献数量 | 占比 |")
+                lines.append("|---------|----------|------|")
+                for level in range(1, 10):
+                    count = distribution.get(f'TRL{level}', 0)
+                    if count > 0:
+                        percentage = count / trl.get('total_papers', 1) * 100
+                        lines.append(f"| TRL {level} | {count} | {percentage:.1f}% |")
+                lines.append("")
+            
+            # 技术可行性
+            feasibility = trl.get('feasibility', {})
+            if feasibility:
+                lines.append("### 技术可行性分析")
+                lines.append(f"- **技术成熟度**: {feasibility.get('maturity', 'N/A')}")
+                lines.append(f"- **实施难度**: {feasibility.get('difficulty', 'N/A')}")
+                lines.append(f"- **资源需求**: {feasibility.get('resource_requirement', 'N/A')}")
+                lines.append(f"- **时间估计**: {feasibility.get('time_estimate', 'N/A')}")
+                lines.append("")
+            
+            # 关键里程碑
+            milestones = trl.get('milestones', [])
+            if milestones:
+                lines.append("### 关键里程碑")
+                for milestone in milestones:
+                    lines.append(f"- **{milestone.get('stage', '')}**: {milestone.get('description', '')}")
+                lines.append("")
         
-        # 5. 创新假设
-        hypotheses = result.get('hypotheses', [])
+        # 5. 创新假设生成
+        innovations = result.get('innovations', {})
+        hypotheses = innovations.get('hypotheses', []) if innovations else []
         if hypotheses:
-            lines.append("## 💭 创新假设\n")
+            lines.append("## 💡 创新假设\n")
+            
             for idx, hyp in enumerate(hypotheses, 1):
-                lines.append(f"{idx}. {hyp}")
-            lines.append("")
+                lines.append(f"### 假设 {idx}: {hyp.get('title', '')}\n")
+                lines.append(f"**ID**: {hyp.get('id', '')}")
+                lines.append(f"**置信度**: {hyp.get('confidence', 0):.2%}\n")
+                
+                lines.append("#### 描述")
+                lines.append(f"{hyp.get('description', '')}\n")
+                
+                lines.append("#### 理论依据")
+                lines.append(f"{hyp.get('rationale', '')}\n")
+                
+                # 可行性
+                feasibility = hyp.get('feasibility', {})
+                lines.append("#### 可行性评估")
+                lines.append(f"- **技术可行性**: {feasibility.get('technical', 'N/A')}")
+                lines.append(f"- **资源可行性**: {feasibility.get('resource', 'N/A')}")
+                lines.append(f"- **时间可行性**: {feasibility.get('time', 'N/A')}")
+                lines.append("")
+                
+                # 所需资源
+                resources = hyp.get('required_resources', {})
+                if resources:
+                    lines.append("#### 所需资源")
+                    lines.append(f"- **资金**: {resources.get('funding', 'N/A')}")
+                    lines.append(f"- **团队**: {resources.get('team_size', 'N/A')}")
+                    lines.append(f"- **周期**: {resources.get('duration', 'N/A')}")
+                    lines.append("")
+                
+                # 支撑文献
+                supporting = hyp.get('supporting_papers', [])
+                if supporting:
+                    lines.append("#### 支撑文献")
+                    for paper in supporting[:3]:
+                        lines.append(f"- {paper}")
+                    lines.append("")
+        
+        # 6. 反事实推理
+        counterfactuals = innovations.get('counterfactual_reasoning', []) if innovations else []
+        if counterfactuals:
+            lines.append("## 🔮 反事实推理分析\n")
+            
+            for cf_group in counterfactuals:
+                hyp_id = cf_group.get('hypothesis_id', '')
+                scenarios = cf_group.get('scenarios', [])
+                
+                if scenarios:
+                    lines.append(f"### 针对假设 {hyp_id}\n")
+                    
+                    for idx, scenario in enumerate(scenarios, 1):
+                        lines.append(f"#### 场景 {idx}: {scenario.get('scenario', '')}\n")
+                        
+                        lines.append(f"**条件变化**: {scenario.get('condition_change', '')}\n")
+                        lines.append(f"**预期结果**: {scenario.get('expected_outcome', '')}\n")
+                        lines.append(f"**成功概率**: {scenario.get('success_probability', 0):.2%}\n")
+                        
+                        risks = scenario.get('risks', [])
+                        if risks:
+                            lines.append("**潜在风险**:")
+                            for risk in risks:
+                                lines.append(f"- {risk}")
+                            lines.append("")
+                        
+                        adjustments = scenario.get('required_adjustments', [])
+                        if adjustments:
+                            lines.append("**所需调整**:")
+                            for adj in adjustments:
+                                lines.append(f"- {adj}")
+                            lines.append("")
+                        
+                        lines.append(f"**时间影响**: {scenario.get('impact_on_timeline', 'N/A')}")
+                        lines.append(f"**资源影响**: {scenario.get('impact_on_resources', 'N/A')}\n")
+        
+        # 7. 跨域知识迁移
+        transfers = innovations.get('cross_domain_transfers', []) if innovations else []
+        if transfers:
+            lines.append("## 🔄 跨域知识迁移推荐\n")
+            
+            for idx, transfer in enumerate(transfers, 1):
+                lines.append(f"### 迁移方案 {idx}\n")
+                lines.append(f"**源领域**: {transfer.get('source_domain', '')}")
+                lines.append(f"**目标领域**: {transfer.get('target_domain', '')}")
+                lines.append(f"**相似度**: {transfer.get('similarity_score', 0):.2%}")
+                lines.append(f"**成功概率**: {transfer.get('success_probability', 0):.2%}\n")
+                
+                lines.append(f"**源方法**: {transfer.get('source_method', '')}")
+                lines.append(f"**目标应用**: {transfer.get('target_application', '')}\n")
+                
+                lines.append(f"**预期收益**: {transfer.get('expected_benefit', '')}\n")
+                
+                challenges = transfer.get('challenges', [])
+                if challenges:
+                    lines.append("**挑战**:")
+                    for challenge in challenges:
+                        lines.append(f"- {challenge}")
+                    lines.append("")
+                
+                steps = transfer.get('implementation_steps', [])
+                if steps:
+                    lines.append("**实施步骤**:")
+                    for step in steps:
+                        lines.append(f"{step}")
+                    lines.append("")
         
         # 页脚
         lines.append("\n---")
