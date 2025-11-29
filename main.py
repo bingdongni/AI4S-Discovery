@@ -158,8 +158,8 @@ def run_init_mode():
     logger.info("初始化系统...")
     
     try:
-        from src.scripts.init_database import init_database
-        from src.scripts.download_models import download_models
+        from scripts.init_database import init_database
+        from scripts.download_models import download_models
         
         # 初始化数据库
         logger.info("初始化数据库...")
