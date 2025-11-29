@@ -1,360 +1,282 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 """
-AI4S-Discovery 命令行工具
-提供便捷的命令行接口进行科研辅助
+命令行界面（CLI）
+提供交互式和非交互式的命令行操作
 """
 
 import asyncio
-import click
-import json
-from pathlib import Path
-from typing import Optional
-from loguru import logger
+import uuid
+from typing import Optional, List
 from rich.console import Console
 from rich.table import Table
 from rich.progress import Progress, SpinnerColumn, TextColumn
 from rich.panel import Panel
 from rich.markdown import Markdown
+from loguru import logger
 
-from src.core.config import settings
-from src.agents.coordinator_agent import coordinator_agent
-from src.database.sqlite_manager import db_manager
-from src.utils.device_manager import device_manager
-
-console = Console()
+from src.agents.coordinator_agent import coordinator, ResearchTask, TaskPriority
+from src.utils.report_generator import ReportGenerator
 
 
-@click.group()
-@click.version_option(version="1.0.0", prog_name="AI4S-Discovery")
-def cli():
-    """
-    AI4S-Discovery - 科研创新辅助工具
+class CLI:
+    """命令行界面类"""
     
-    基于多智能体架构的学术文献分析与创新假设生成系统
-    """
-    pass
-
-
-@cli.command()
-@click.argument('query')
-@click.option('--max-papers', default=100, help='最大文献数量')
-@click.option('--sources', default='arxiv,semantic_scholar', help='数据源（逗号分隔）')
-@click.option('--output', '-o', help='输出文件路径')
-@click.option('--format', default='json', type=click.Choice(['json', 'markdown', 'html']), help='输出格式')
-def search(query: str, max_papers: int, sources: str, output: Optional[str], format: str):
-    """
-    搜索学术文献
+    def __init__(self):
+        """初始化CLI"""
+        self.console = Console()
+        self.report_generator = ReportGenerator()
+        logger.info("CLI初始化完成")
     
-    示例:
-        ai4s search "transformer attention mechanism" --max-papers 50
-        ai4s search "钙钛矿太阳能电池" --sources arxiv,pubmed -o results.json
-    """
-    console.print(Panel.fit(
-        f"[bold cyan]搜索查询:[/bold cyan] {query}\n"
-        f"[bold cyan]数据源:[/bold cyan] {sources}\n"
-        f"[bold cyan]最大文献数:[/bold cyan] {max_papers}",
-        title="🔍 文献搜索",
-        border_style="cyan"
-    ))
-    
-    source_list = [s.strip() for s in sources.split(',')]
-    
-    with Progress(
-        SpinnerColumn(),
-        TextColumn("[progress.description]{task.description}"),
-        console=console
-    ) as progress:
-        task = progress.add_task("正在搜索文献...", total=None)
+    def research(
+        self,
+        query: str,
+        domains: Optional[List[str]] = None,
+        depth: str = "comprehensive",
+        include_patents: bool = False,
+        generate_hypotheses: bool = True,
+        trl_assessment: bool = True,
+    ) -> dict:
+        """
+        执行研究查询
         
-        try:
-            result = asyncio.run(coordinator_agent.process_query(
-                query=query,
-                max_papers=max_papers,
-                sources=source_list
+        Args:
+            query: 研究查询
+            domains: 研究领域
+            depth: 分析深度
+            include_patents: 是否包含专利
+            generate_hypotheses: 是否生成假设
+            trl_assessment: 是否TRL评估
+        
+        Returns:
+            dict: 研究结果
+        """
+        self.console.print(f"\n[bold cyan]🔬 开始研究任务[/bold cyan]")
+        self.console.print(f"查询: [yellow]{query}[/yellow]")
+        
+        # 创建任务
+        task_id = str(uuid.uuid4())
+        task = ResearchTask(
+            task_id=task_id,
+            query=query,
+            domains=domains,
+            depth=depth,
+            include_patents=include_patents,
+            generate_hypotheses=generate_hypotheses,
+            trl_assessment=trl_assessment,
+            priority=TaskPriority.HIGH,
+        )
+        
+        # 提交任务并等待完成
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            console=self.console,
+        ) as progress:
+            task_progress = progress.add_task("执行中...", total=None)
+            
+            # 运行异步任务
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            loop.run_until_complete(coordinator.submit_task(task))
+            
+            # 等待任务完成
+            while task.status.value in ['pending', 'running']:
+                loop.run_until_complete(asyncio.sleep(0.5))
+                progress.update(
+                    task_progress,
+                    description=f"执行中... ({task.progress*100:.0f}%)"
+                )
+            
+            loop.close()
+        
+        # 获取结果
+        if task.status.value == 'completed':
+            self.console.print("[bold green]✓ 任务完成[/bold green]\n")
+            return task.results
+        else:
+            self.console.print(f"[bold red]✗ 任务失败: {task.errors}[/bold red]\n")
+            return {}
+    
+    def print_result(self, result: dict):
+        """
+        打印研究结果
+        
+        Args:
+            result: 研究结果
+        """
+        if not result:
+            self.console.print("[yellow]没有结果[/yellow]")
+            return
+        
+        # 1. 文献统计
+        literature = result.get('literature', {})
+        self.console.print(Panel.fit(
+            f"[bold]文献搜索结果[/bold]\n\n"
+            f"总计: {literature.get('total_papers', 0)} 篇\n"
+            f"来源: {', '.join(f'{k}({v})' for k, v in literature.get('sources', {}).items())}",
+            title="📚 文献统计",
+            border_style="cyan"
+        ))
+        
+        # 2. 分析结果
+        analysis = result.get('analysis', {})
+        if analysis:
+            stats = analysis.get('statistics', {})
+            
+            self.console.print(Panel.fit(
+                f"[bold]质量分析[/bold]\n\n"
+                f"分析总数: {analysis.get('total_analyzed', 0)} 篇\n"
+                f"高质量: {analysis.get('high_quality_count', 0)} 篇\n"
+                f"质量阈值: {analysis.get('quality_threshold', 0)}\n"
+                f"平均引用: {stats.get('avg_citations', 0):.1f}",
+                title="📊 分析统计",
+                border_style="green"
             ))
             
-            progress.update(task, description="✓ 搜索完成")
-            
-            # 显示结果摘要
-            papers = result.get('papers', [])
-            console.print(f"\n[green]✓[/green] 找到 {len(papers)} 篇相关文献")
-            
-            if papers:
-                table = Table(title="文献列表（前10篇）", show_header=True, header_style="bold magenta")
-                table.add_column("标题", style="cyan", width=50)
-                table.add_column("年份", justify="center", width=6)
-                table.add_column("引用", justify="right", width=6)
-                table.add_column("评分", justify="right", width=6)
+            # 关键词
+            keywords = analysis.get('keywords', [])[:10]
+            if keywords:
+                table = Table(title="🔑 关键词（Top 10）", show_header=True)
+                table.add_column("排名", style="cyan", width=6)
+                table.add_column("关键词", style="yellow")
+                table.add_column("TF-IDF", style="green", justify="right")
+                table.add_column("频次", style="blue", justify="right")
                 
-                for paper in papers[:10]:
+                for idx, kw in enumerate(keywords, 1):
                     table.add_row(
-                        paper.get('title', 'N/A')[:47] + '...' if len(paper.get('title', '')) > 50 else paper.get('title', 'N/A'),
-                        str(paper.get('year', 'N/A')),
-                        str(paper.get('citationCount', 0)),
-                        f"{paper.get('quality_score', 0):.1f}" if paper.get('quality_score') else 'N/A'
+                        str(idx),
+                        kw.get('term', ''),
+                        f"{kw.get('tfidf_score', 0):.4f}",
+                        str(kw.get('frequency', 0))
                     )
                 
-                console.print(table)
+                self.console.print(table)
             
-            # 保存结果
-            if output:
-                output_path = Path(output)
-                output_path.parent.mkdir(parents=True, exist_ok=True)
-                
-                if format == 'json':
-                    with open(output_path, 'w', encoding='utf-8') as f:
-                        json.dump(result, f, ensure_ascii=False, indent=2)
-                elif format == 'markdown':
-                    md_content = _generate_markdown_report(result)
-                    with open(output_path, 'w', encoding='utf-8') as f:
-                        f.write(md_content)
-                
-                console.print(f"\n[green]✓[/green] 结果已保存至: {output_path}")
-            
-        except Exception as e:
-            console.print(f"[red]✗ 搜索失败:[/red] {str(e)}")
-            logger.error(f"搜索失败: {e}", exc_info=True)
-
-
-@cli.command()
-@click.argument('query')
-@click.option('--max-papers', default=100, help='最大文献数量')
-@click.option('--hypothesis-count', default=5, help='生成假设数量')
-@click.option('--output', '-o', help='输出文件路径')
-def analyze(query: str, max_papers: int, hypothesis_count: int, output: Optional[str]):
-    """
-    完整分析：搜索+分析+假设生成+评估
-    
-    示例:
-        ai4s analyze "阿尔茨海默病免疫代谢靶点" --hypothesis-count 3
-        ai4s analyze "量子计算优化算法" -o report.md
-    """
-    console.print(Panel.fit(
-        f"[bold cyan]研究主题:[/bold cyan] {query}\n"
-        f"[bold cyan]文献数量:[/bold cyan] {max_papers}\n"
-        f"[bold cyan]假设数量:[/bold cyan] {hypothesis_count}",
-        title="🔬 全流程分析",
-        border_style="cyan"
-    ))
-    
-    with Progress(
-        SpinnerColumn(),
-        TextColumn("[progress.description]{task.description}"),
-        console=console
-    ) as progress:
-        try:
-            # 执行完整分析
-            task = progress.add_task("正在执行全流程分析...", total=None)
-            
-            result = asyncio.run(coordinator_agent.process_query(
-                query=query,
-                max_papers=max_papers
+            # 关键发现
+            findings = analysis.get('key_findings', [])[:5]
+            if findings:
+                self.console.print("\n[bold cyan]💡 关键发现（Top 5）[/bold cyan]\n")
+                for idx, finding in enumerate(findings, 1):
+                    self.console.print(f"[bold]{idx}. {finding.get('title', '')}[/bold]")
+                    self.console.print(f"   作者: {', '.join(finding.get('authors', [])[:3])}")
+                    self.console.print(f"   年份: {finding.get('year', 'N/A')} | "
+                                     f"质量分: {finding.get('quality_score', 0):.1f} | "
+                                     f"引用: {finding.get('citations', 0)}")
+                    self.console.print(f"   摘要: {finding.get('abstract', '')[:150]}...\n")
+        
+        # 3. 知识图谱
+        graph = result.get('knowledge_graph', {})
+        if graph:
+            self.console.print(Panel.fit(
+                f"[bold]图谱构建[/bold]\n\n"
+                f"节点数: {graph.get('nodes', 0)}\n"
+                f"边数: {graph.get('edges', 0)}\n"
+                f"聚类数: {len(graph.get('clusters', []))}",
+                title="🕸️ 知识图谱",
+                border_style="magenta"
             ))
-            
-            progress.update(task, description="✓ 分析完成")
-            
-            # 显示结果
-            _display_analysis_result(result)
-            
-            # 保存结果
-            if output:
-                output_path = Path(output)
-                output_path.parent.mkdir(parents=True, exist_ok=True)
-                
-                md_content = _generate_full_report(result, query)
-                with open(output_path, 'w', encoding='utf-8') as f:
-                    f.write(md_content)
-                
-                console.print(f"\n[green]✓[/green] 完整报告已保存至: {output_path}")
-            
-        except Exception as e:
-            console.print(f"[red]✗ 分析失败:[/red] {str(e)}")
-            logger.error(f"分析失败: {e}", exc_info=True)
-
-
-@cli.command()
-def status():
-    """显示系统状态"""
-    console.print(Panel.fit(
-        "[bold cyan]AI4S-Discovery 系统状态[/bold cyan]",
-        border_style="cyan"
-    ))
+        
+        # 4. TRL评估
+        trl = result.get('trl_assessment', {})
+        if trl and trl.get('level'):
+            self.console.print(Panel.fit(
+                f"[bold]技术成熟度评估[/bold]\n\n"
+                f"TRL等级: {trl.get('level', 0)}\n"
+                f"置信度: {trl.get('confidence', 0):.2%}",
+                title="📈 TRL评估",
+                border_style="yellow"
+            ))
+        
+        # 5. 创新假设
+        hypotheses = result.get('hypotheses', [])
+        if hypotheses:
+            self.console.print("\n[bold cyan]💭 创新假设[/bold cyan]\n")
+            for idx, hyp in enumerate(hypotheses, 1):
+                self.console.print(f"{idx}. {hyp}")
     
-    # 设备信息
-    device_info = device_manager.get_device_info()
-    console.print("\n[bold]硬件信息:[/bold]")
-    console.print(f"  设备类型: {device_info['device_type']}")
-    console.print(f"  设备名称: {device_info['device_name']}")
-    console.print(f"  内存使用: {device_info['memory_used']:.1f}GB / {device_info['memory_total']:.1f}GB")
-    
-    if device_info['device_type'] == 'cuda':
-        console.print(f"  GPU内存: {device_info.get('gpu_memory_used', 0):.1f}GB / {device_info.get('gpu_memory_total', 0):.1f}GB")
-    
-    # 数据库统计
-    stats = db_manager.get_statistics()
-    console.print("\n[bold]数据库统计:[/bold]")
-    console.print(f"  活跃用户: {stats['active_users']}")
-    console.print(f"  总任务数: {stats['total_tasks']}")
-    console.print(f"  完成任务: {stats['completed_tasks']}")
-    console.print(f"  完成率: {stats['completion_rate']}%")
-    console.print(f"  缓存文献: {stats['cached_papers']}")
-    console.print(f"  生成报告: {stats['total_reports']}")
-    
-    # 配置信息
-    console.print("\n[bold]配置信息:[/bold]")
-    console.print(f"  项目名称: {settings.PROJECT_NAME}")
-    console.print(f"  版本: {settings.VERSION}")
-    console.print(f"  环境: {settings.ENVIRONMENT}")
-    console.print(f"  日志级别: {settings.LOG_LEVEL}")
-
-
-@cli.command()
-@click.option('--limit', default=10, help='显示数量')
-def history(limit: int):
-    """查看搜索历史"""
-    console.print(Panel.fit(
-        "[bold cyan]搜索历史[/bold cyan]",
-        border_style="cyan"
-    ))
-    
-    history_list = db_manager.get_search_history(limit=limit)
-    
-    if not history_list:
-        console.print("\n[yellow]暂无搜索历史[/yellow]")
-        return
-    
-    table = Table(show_header=True, header_style="bold magenta")
-    table.add_column("时间", style="cyan", width=20)
-    table.add_column("查询", style="white", width=50)
-    table.add_column("结果数", justify="right", width=8)
-    table.add_column("耗时(s)", justify="right", width=10)
-    
-    for item in history_list:
-        table.add_row(
-            item['created_at'],
-            item['query'][:47] + '...' if len(item['query']) > 50 else item['query'],
-            str(item['result_count']),
-            f"{item['execution_time']:.2f}"
-        )
-    
-    console.print(table)
-
-
-@cli.command()
-def clear_cache():
-    """清除缓存数据"""
-    if click.confirm('确定要清除所有缓存数据吗？'):
+    def export_report(self, result: dict, output_path: str, format: str = 'pdf'):
+        """
+        导出报告
+        
+        Args:
+            result: 研究结果
+            output_path: 输出路径
+            format: 报告格式
+        """
+        self.console.print(f"\n[cyan]正在生成{format.upper()}报告...[/cyan]")
+        
         try:
-            # 这里可以添加清除缓存的逻辑
-            console.print("[green]✓[/green] 缓存已清除")
+            self.report_generator.generate(
+                result=result,
+                output_path=output_path,
+                format=format
+            )
+            self.console.print(f"[green]✓ 报告已保存至: {output_path}[/green]")
         except Exception as e:
-            console.print(f"[red]✗ 清除失败:[/red] {str(e)}")
-
-
-def _display_analysis_result(result: dict):
-    """显示分析结果"""
-    console.print("\n" + "="*80)
-    console.print("[bold green]分析结果摘要[/bold green]")
-    console.print("="*80)
+            self.console.print(f"[red]✗ 报告生成失败: {e}[/red]")
     
-    # 文献统计
-    papers = result.get('papers', [])
-    console.print(f"\n📚 文献数量: {len(papers)}")
-    
-    # 趋势分析
-    trends = result.get('trends', {})
-    if trends:
-        console.print(f"\n📈 研究趋势:")
-        console.print(f"  增长率: {trends.get('growth_rate', 'N/A')}")
-        console.print(f"  热门主题: {', '.join(trends.get('hot_topics', [])[:5])}")
-    
-    # 创新假设
-    hypotheses = result.get('hypotheses', [])
-    if hypotheses:
-        console.print(f"\n💡 创新假设 ({len(hypotheses)}个):")
-        for i, hyp in enumerate(hypotheses[:3], 1):
-            console.print(f"\n  {i}. {hyp.get('title', 'N/A')}")
-            console.print(f"     置信度: {hyp.get('confidence', 0):.2f}")
-            console.print(f"     描述: {hyp.get('description', 'N/A')[:100]}...")
-    
-    # TRL评估
-    evaluation = result.get('evaluation', {})
-    if evaluation:
-        trl = evaluation.get('trl_assessment', {})
-        console.print(f"\n🎯 技术成熟度:")
-        console.print(f"  TRL等级: {trl.get('level', 'N/A')}")
-        console.print(f"  描述: {trl.get('description', 'N/A')}")
-        console.print(f"  置信度: {trl.get('confidence', 0):.2f}")
-
-
-def _generate_markdown_report(result: dict) -> str:
-    """生成Markdown格式报告"""
-    papers = result.get('papers', [])
-    
-    md = "# 文献搜索结果\n\n"
-    md += f"**搜索时间:** {result.get('timestamp', 'N/A')}\n\n"
-    md += f"**文献数量:** {len(papers)}\n\n"
-    md += "## 文献列表\n\n"
-    
-    for i, paper in enumerate(papers, 1):
-        md += f"### {i}. {paper.get('title', 'N/A')}\n\n"
-        md += f"- **作者:** {', '.join([a.get('name', 'N/A') for a in paper.get('authors', [])[:3]])}\n"
-        md += f"- **年份:** {paper.get('year', 'N/A')}\n"
-        md += f"- **引用数:** {paper.get('citationCount', 0)}\n"
-        md += f"- **摘要:** {paper.get('abstract', 'N/A')[:200]}...\n\n"
-    
-    return md
-
-
-def _generate_full_report(result: dict, query: str) -> str:
-    """生成完整分析报告"""
-    md = f"# {query} - 研究分析报告\n\n"
-    md += f"**生成时间:** {result.get('timestamp', 'N/A')}\n\n"
-    md += "---\n\n"
-    
-    # 执行摘要
-    md += "## 执行摘要\n\n"
-    md += f"本报告针对「{query}」进行了全面的文献分析和创新假设生成。\n\n"
-    
-    # 文献统计
-    papers = result.get('papers', [])
-    md += f"### 文献统计\n\n"
-    md += f"- 总文献数: {len(papers)}\n"
-    md += f"- 平均引用数: {sum(p.get('citationCount', 0) for p in papers) / len(papers) if papers else 0:.1f}\n\n"
-    
-    # 研究趋势
-    trends = result.get('trends', {})
-    if trends:
-        md += "## 研究趋势\n\n"
-        md += f"- 增长率: {trends.get('growth_rate', 'N/A')}\n"
-        md += f"- 热门主题: {', '.join(trends.get('hot_topics', []))}\n\n"
-    
-    # 创新假设
-    hypotheses = result.get('hypotheses', [])
-    if hypotheses:
-        md += "## 创新假设\n\n"
-        for i, hyp in enumerate(hypotheses, 1):
-            md += f"### 假设 {i}: {hyp.get('title', 'N/A')}\n\n"
-            md += f"**置信度:** {hyp.get('confidence', 0):.2f}\n\n"
-            md += f"**描述:** {hyp.get('description', 'N/A')}\n\n"
-            md += f"**理论依据:** {hyp.get('rationale', 'N/A')}\n\n"
-    
-    # TRL评估
-    evaluation = result.get('evaluation', {})
-    if evaluation:
-        trl = evaluation.get('trl_assessment', {})
-        md += "## 技术成熟度评估\n\n"
-        md += f"- **TRL等级:** {trl.get('level', 'N/A')}\n"
-        md += f"- **描述:** {trl.get('description', 'N/A')}\n"
-        md += f"- **置信度:** {trl.get('confidence', 0):.2f}\n"
-        md += f"- **预计上市时间:** {trl.get('estimated_time_to_market', 'N/A')}\n\n"
-    
-    md += "---\n\n"
-    md += "*本报告由 AI4S-Discovery 自动生成*\n"
-    
-    return md
-
-
-if __name__ == '__main__':
-    cli()
+    def interactive_mode(self):
+        """交互式模式"""
+        self.console.print(Panel.fit(
+            "[bold cyan]AI4S-Discovery 交互式命令行[/bold cyan]\n\n"
+            "输入研究查询开始，输入 'exit' 或 'quit' 退出",
+            border_style="cyan"
+        ))
+        
+        while True:
+            try:
+                # 获取查询
+                query = self.console.input("\n[bold yellow]研究查询>[/bold yellow] ")
+                
+                if query.lower() in ['exit', 'quit', 'q']:
+                    self.console.print("[cyan]再见！[/cyan]")
+                    break
+                
+                if not query.strip():
+                    continue
+                
+                # 询问参数
+                depth = self.console.input(
+                    "[dim]分析深度 (quick/standard/comprehensive) [comprehensive]:[/dim] "
+                ).strip() or "comprehensive"
+                
+                include_patents = self.console.input(
+                    "[dim]包含专利? (y/n) [n]:[/dim] "
+                ).strip().lower() == 'y'
+                
+                # 执行研究
+                result = self.research(
+                    query=query,
+                    depth=depth,
+                    include_patents=include_patents,
+                    generate_hypotheses=True,
+                    trl_assessment=True,
+                )
+                
+                # 显示结果
+                self.print_result(result)
+                
+                # 询问是否导出
+                export = self.console.input(
+                    "\n[dim]是否导出报告? (y/n) [n]:[/dim] "
+                ).strip().lower()
+                
+                if export == 'y':
+                    output_path = self.console.input(
+                        "[dim]输出路径:[/dim] "
+                    ).strip()
+                    
+                    format = self.console.input(
+                        "[dim]格式 (pdf/docx/html/markdown) [pdf]:[/dim] "
+                    ).strip() or "pdf"
+                    
+                    if output_path:
+                        self.export_report(result, output_path, format)
+                
+            except KeyboardInterrupt:
+                self.console.print("\n[cyan]再见！[/cyan]")
+                break
+            except Exception as e:
+                self.console.print(f"[red]错误: {e}[/red]")
+                logger.exception("交互式模式错误")
