@@ -1,3 +1,5 @@
+
+
 # AI4S-Discovery
 
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
@@ -59,7 +61,7 @@ pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
 
 4. **配置环境变量**
 ```bash
-copy .env.example .env
+copy .env.example .env.example .env
 # 编辑 .env 文件，配置必要的参数
 # 重要：配置OpenAI API密钥以启用LLM功能
 # OPENAI_API_KEY=your_api_key_here
@@ -115,6 +117,8 @@ docker run -d -p 8501:8501 -p 8000:8000 -v ./data:/app/data ai4s-discovery
 - 输出综合报告
 
 ### 2. 通过API调用
+
+调用 `/api/v1` 接口时，请在请求头中携带 `x-api-key`（值与 `.env` 中配置的 `API_KEY` 一致）。
 
 ```python
 import requests
